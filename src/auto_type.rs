@@ -10,6 +10,7 @@ use {
 struct Expander {
 	/// Can be overridden to provide custom DSLs or directly refer to `diesel::dsl`
 	dsl_path: Option<syn::Path>,
+	// TODO add inline param
 }
 
 pub(crate) fn auto_type_impl(attr: TokenStream, input: &TokenStream) -> Result<TokenStream, crate::Error> {
@@ -75,7 +76,10 @@ impl Expander {
 								.map(|e| self.infer_expression_type(e).map(syn::GenericArgument::Type))
 								.collect::<Result<_, _>>()?
 						}
-						syn::PathArguments::AngleBracketed(ab) => std::mem::take(&mut ab.args),
+						syn::PathArguments::AngleBracketed(ab) => {
+							// TODO if there are underscores in there we should still infer
+							std::mem::take(&mut ab.args)
+						}
 						syn::PathArguments::Parenthesized(_) => return Err(unsupported_function_type()),
 					},
 					colon2_token: None, // there is no colon2 in types, only in function calls
