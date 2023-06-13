@@ -1,0 +1,22 @@
+[package]
+	description = "Automatically expand query fragment types for factoring as functions"
+	edition = "2021"
+	license = ""
+	name = "diesel_auto_type"
+	version = "0.1.0"
+
+	# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+	darling = "0.20"
+	either = "1"
+	heck = "0.4"
+	proc-macro2 = "1"
+	quote = "1"
+	syn = { version = "2", features = ["extra-traits", "full", "derive", "parsing"] }
+
+[dev-dependencies]
+	diesel = "2"
+
+[lib]
+	proc-macro = true
