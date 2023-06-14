@@ -36,9 +36,17 @@ impl TypeInferrer<'_> {
 						..type_tuple.clone()
 					})
 				}
-				_ => hint.clone(),
+				_ => {
+					// We're not going to be able to infer anything from this expression if its output is a tuple
+					// and its expression isn't
+					hint.clone()
+				}
 			},
-			_ => hint.clone(),
+			_ => {
+				// TODO this can be improved to infer through partially hinted function calls
+				// This probably means merging this function with `infer_expression_type`
+				hint.clone()
+			}
 		}
 	}
 	/// Calls `try_infer_expression_type` and falls back to `_` if it fails, collecting the error
