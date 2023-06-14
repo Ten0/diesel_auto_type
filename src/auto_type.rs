@@ -3,7 +3,7 @@ use {
 	either::Either,
 	proc_macro2::{Span, TokenStream},
 	quote::quote,
-	syn::{parse_quote, spanned::Spanned, Ident, ItemFn, Type},
+	syn::{parse_quote, spanned::Spanned, Ident, ItemFn, Token, Type},
 };
 
 #[derive(darling::FromMeta)]
@@ -68,25 +68,15 @@ impl Expander {
 				};
 				// Then we will add the generic arguments
 				let last_segment = type_path.segments.last_mut().ok_or_else(unsupported_function_type)?;
-				last_segment.arguments = syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-					args: match &mut last_segment.arguments {
-						syn::PathArguments::None => {
-							// We should infer
-							args.iter()
-								.map(|e| self.infer_expression_type(e).map(syn::GenericArgument::Type))
-								.collect::<Result<_, _>>()?
-						}
-						syn::PathArguments::AngleBracketed(ab) => {
-							// TODO if there are underscores in there we should still infer
-							std::mem::take(&mut ab.args)
-						}
+				last_segment.arguments = self.infer_generics_or_use_hint(
+					None,
+					args,
+					match &last_segment.arguments {
+						syn::PathArguments::None => None,
+						syn::PathArguments::AngleBracketed(ab) => Some(ab),
 						syn::PathArguments::Parenthesized(_) => return Err(unsupported_function_type()),
 					},
-					colon2_token: None, // there is no colon2 in types, only in function calls
-					lt_token: Default::default(),
-					gt_token: Default::default(),
-				});
-				//last_segment.arguments
+				)?;
 				syn::Type::Path(syn::TypePath {
 					path: type_path,
 					qself: None,
@@ -115,24 +105,11 @@ impl Expander {
 							&heck::ToPascalCase::to_pascal_case(method.to_string().as_str()),
 							method.span(),
 						),
-						arguments: syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-							args: {
-								std::iter::once(self.infer_expression_type(receiver).map(syn::GenericArgument::Type))
-									.chain(match turbofish {
-										Some(angle_bracketed_arguments) => {
-											Either::Left(angle_bracketed_arguments.args.iter().cloned().map(Ok))
-										}
-										None => Either::Right(
-											args.iter()
-												.map(|e| self.infer_expression_type(e).map(syn::GenericArgument::Type)),
-										),
-									})
-									.collect::<Result<_, _>>()?
-							},
-							colon2_token: None,
-							lt_token: Default::default(),
-							gt_token: Default::default(),
-						}),
+						arguments: self.infer_generics_or_use_hint(
+							Some(syn::GenericArgument::Type(self.infer_expression_type(receiver)?)),
+							args,
+							turbofish.as_ref(),
+						)?,
 					}])
 					.collect(),
 					leading_colon: None,
@@ -159,6 +136,58 @@ impl Expander {
 			_ => return Err(syn::Error::new(expr.span(), "unsupported expression for auto_type")),
 		};
 		Ok(expression_type)
+	}
+
+	fn infer_generics_or_use_hint(
+		&self,
+		add_first: Option<syn::GenericArgument>,
+		args: &syn::punctuated::Punctuated<syn::Expr, Token![,]>,
+		hint: Option<&syn::AngleBracketedGenericArguments>,
+	) -> Result<syn::PathArguments, syn::Error> {
+		let arguments = syn::AngleBracketedGenericArguments {
+			args: add_first
+				.into_iter()
+				.map(Ok)
+				.chain(match hint {
+					None => {
+						// We should infer
+						Either::Left(
+							args.iter()
+								.map(|e| self.infer_expression_type(e).map(syn::GenericArgument::Type)),
+						)
+					}
+					Some(hint_or_override) => Either::Right({
+						let hints_none_if_infer = hint_or_override.args.iter().map(|ga| match ga {
+							syn::GenericArgument::Type(syn::Type::Infer(_)) => None,
+							other => Some(other),
+						});
+						if hints_none_if_infer.clone().any(|arg| arg.is_none()) {
+							// This is only partially hinted: we know how many generics there are, but there are some
+							// underscores. We need to infer those.
+							Either::Left(hints_none_if_infer.zip(args.iter()).map(
+								|(hint, expr)| -> Result<_, syn::Error> {
+									Ok(match hint {
+										Some(hint) => hint.clone(),
+										None => self.infer_expression_type(expr).map(syn::GenericArgument::Type)?,
+									})
+								},
+							))
+						} else {
+							// No underscores, we can just take the provided arguments
+							Either::Right(hint_or_override.args.iter().cloned().map(Ok))
+						}
+					}),
+				})
+				.collect::<Result<_, _>>()?,
+			colon2_token: None, // there is no colon2 in types, only in function calls
+			lt_token: Default::default(),
+			gt_token: Default::default(),
+		};
+		Ok(if arguments.args.is_empty() {
+			syn::PathArguments::None
+		} else {
+			syn::PathArguments::AngleBracketed(arguments)
+		})
 	}
 }
 

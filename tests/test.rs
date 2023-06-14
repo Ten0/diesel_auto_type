@@ -10,7 +10,7 @@ diesel::table! {
 
 #[auto_type]
 fn automatically_typed_function() -> _ {
-	dsl::not(abc::id.eq(1i32))
+	dsl::not(abc::id.eq::<i32>(1))
 }
 
 #[test]
