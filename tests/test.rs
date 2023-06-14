@@ -13,9 +13,14 @@ fn inline_rendering() -> _ {
 	dsl::not(abc::id.eq::<i32>(1))
 }
 
+fn outer_function() -> i32 {
+	1
+}
 #[auto_type(type_alias)]
-fn type_aliased() -> _ {
-	dsl::not(abc::id.eq(1i32))
+fn type_aliased_and_local_variables(y: i32) -> _ {
+	let x = outer_function();
+	let (a, b): (i32, _) = (x, y);
+	dsl::not(abc::id.eq(a).or(abc::id.eq(b)))
 }
 
 #[auto_type(type_case = "PascalCase")]
@@ -32,7 +37,7 @@ fn type_aliased_custom() -> _ {
 fn test_auto_type() {
 	let _ = abc::table.select(inline_rendering());
 
-	let ta: type_aliased = type_aliased();
+	let ta: type_aliased_and_local_variables = type_aliased_and_local_variables(3);
 	let _ = abc::table.select(ta);
 
 	let ta: TypeAliasedPascal = type_aliased_pascal();
