@@ -90,7 +90,6 @@ pub(crate) fn auto_type_impl(attr: TokenStream, input: &TokenStream) -> Result<T
 			}
 
 			// Now we can process the last statement
-			let inferrer = local_variables_map.inferrer();
 			let return_expression = match last_statement {
 				syn::Stmt::Expr(expr, None) => expr,
 				syn::Stmt::Expr(syn::Expr::Return(syn::ExprReturn { expr: Some(expr), .. }), _) => &**expr,
@@ -102,6 +101,7 @@ pub(crate) fn auto_type_impl(attr: TokenStream, input: &TokenStream) -> Result<T
 					.into())
 				}
 			};
+			let inferrer = local_variables_map.inferrer();
 			(
 				inferrer.infer_expression_type(return_expression),
 				inferrer.into_errors(),
