@@ -13,13 +13,10 @@ fn inline_rendering() -> _ {
 	dsl::not(abc::id.eq::<i32>(1))
 }
 
-fn outer_function() -> i32 {
-	1
-}
 #[auto_type(type_alias)]
 fn type_aliased_and_local_variables(y: i32) -> _ {
-	let x = outer_function();
-	let (a, b): (i32, _) = (x, y);
+	let x = 1; // ambiguous type
+	let ((a,), (b,)): ((i32,), _) = ((x,), (y,));
 	dsl::not(abc::id.eq(a).or(abc::id.eq(b)))
 }
 

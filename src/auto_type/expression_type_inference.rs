@@ -15,6 +15,32 @@ pub(crate) struct TypeInferrer<'s> {
 }
 
 impl TypeInferrer<'_> {
+	pub(crate) fn infer_hinted_expression_type(&self, expr: &syn::Expr, hint: &syn::Type) -> syn::Type {
+		match hint {
+			syn::Type::Infer(_) => self.infer_expression_type(expr),
+			syn::Type::Tuple(type_tuple @ syn::TypeTuple { elems: type_elems, .. }) => match expr {
+				syn::Expr::Tuple(syn::ExprTuple { elems: expr_elems, .. }) => {
+					if type_elems.len() != expr_elems.len() {
+						return self.register_error(syn::Error::new(
+							type_tuple.span(),
+							"auto_type: tuple type and its \
+									expression have different number of elements",
+						));
+					}
+					syn::Type::Tuple(syn::TypeTuple {
+						elems: type_elems
+							.iter()
+							.zip(expr_elems.iter())
+							.map(|(type_, expr)| self.infer_hinted_expression_type(expr, type_))
+							.collect(),
+						..type_tuple.clone()
+					})
+				}
+				_ => hint.clone(),
+			},
+			_ => hint.clone(),
+		}
+	}
 	/// Calls `try_infer_expression_type` and falls back to `_` if it fails, collecting the error
 	/// for display
 	pub(crate) fn infer_expression_type(&self, expr: &syn::Expr) -> syn::Type {
@@ -22,11 +48,12 @@ impl TypeInferrer<'_> {
 
 		match inferred {
 			Ok(t) => t,
-			Err(e) => {
-				self.errors.borrow_mut().push(Rc::new(e));
-				parse_quote!(_)
-			}
+			Err(e) => self.register_error(e),
 		}
+	}
+	fn register_error(&self, error: syn::Error) -> syn::Type {
+		self.errors.borrow_mut().push(Rc::new(error));
+		parse_quote!(_)
 	}
 	fn try_infer_expression_type(&self, expr: &syn::Expr) -> Result<syn::Type, syn::Error> {
 		let expression_type: syn::Type = match expr {

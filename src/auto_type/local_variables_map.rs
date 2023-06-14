@@ -37,60 +37,32 @@ impl<'a> LocalVariablesMap<'a> {
 			syn::Pat::Ident(pat_ident) => {
 				self.map.insert(
 					&pat_ident.ident,
-					match type_ascription {
-						Some(type_ascription) if !matches!(type_ascription, Type::Infer(_)) => {
-							match (type_ascription, local_init_expression) {
-								(
-									Type::Tuple(type_tuple @ syn::TypeTuple { elems: type_elems, .. }),
-									Some(syn::Expr::Tuple(syn::ExprTuple { elems: expr_elems, .. })),
-								) => {
-									if type_elems.len() != expr_elems.len() {
-										return Err(syn::Error::new(
-											type_ascription.span(),
-											"auto_type: tuple let assignment and its initializer \
-												expression have different number of elements",
-										));
-									}
-									let inferrer = self.inferrer();
-									LetStatementInferredType {
-										type_: syn::Type::Tuple(syn::TypeTuple {
-											elems: type_elems
-												.iter()
-												.zip(expr_elems.iter())
-												.map(|(type_, expr)| match type_ {
-													Type::Infer(_) => inferrer.infer_expression_type(expr),
-													// Possible improvement: recursively infer tuple elements
-													_ => type_.clone(),
-												})
-												.collect(),
-											..type_tuple.clone()
-										}),
-										errors: inferrer.into_errors(),
-									}
-								}
-								_ => LetStatementInferredType {
-									type_: type_ascription.clone(),
-									errors: Vec::new(),
-								},
+					match (type_ascription, local_init_expression) {
+						(None, Some(expr)) => {
+							let inferrer = self.inferrer();
+							LetStatementInferredType {
+								type_: inferrer.infer_expression_type(expr),
+								errors: inferrer.into_errors(),
 							}
 						}
-						_ => match local_init_expression {
-							Some(expression) => {
-								let inferrer = self.inferrer();
-								let expression_type = inferrer.infer_expression_type(expression);
-								LetStatementInferredType {
-									type_: expression_type,
-									errors: inferrer.into_errors(),
-								}
+						(Some(type_ascription), None) => LetStatementInferredType {
+							type_: type_ascription.clone(),
+							errors: Vec::new(),
+						},
+						(Some(type_ascription), Some(expr)) => {
+							let inferrer = self.inferrer();
+							LetStatementInferredType {
+								type_: inferrer.infer_hinted_expression_type(expr, type_ascription),
+								errors: inferrer.into_errors(),
 							}
-							None => LetStatementInferredType {
-								type_: parse_quote!(_),
-								errors: vec![Rc::new(syn::Error::new_spanned(
-									pat_ident,
-									"auto_type: Let statement with no type ascription \
-											and no initializer expression is not supported",
-								))],
-							},
+						}
+						(None, None) => LetStatementInferredType {
+							type_: parse_quote!(_),
+							errors: vec![Rc::new(syn::Error::new_spanned(
+								pat_ident,
+								"auto_type: Let statement with no type ascription \
+									and no initializer expression is not supported",
+							))],
 						},
 					},
 				);
