@@ -68,7 +68,7 @@ impl Expander {
 				};
 				// Then we will add the generic arguments
 				let last_segment = type_path.segments.last_mut().ok_or_else(unsupported_function_type)?;
-				last_segment.arguments = self.infer_generics_or_use_hint(
+				last_segment.arguments = self.infer_generics_or_use_hints(
 					None,
 					args,
 					match &last_segment.arguments {
@@ -105,7 +105,7 @@ impl Expander {
 							&heck::ToPascalCase::to_pascal_case(method.to_string().as_str()),
 							method.span(),
 						),
-						arguments: self.infer_generics_or_use_hint(
+						arguments: self.infer_generics_or_use_hints(
 							Some(syn::GenericArgument::Type(self.infer_expression_type(receiver)?)),
 							args,
 							turbofish.as_ref(),
@@ -138,7 +138,7 @@ impl Expander {
 		Ok(expression_type)
 	}
 
-	fn infer_generics_or_use_hint(
+	fn infer_generics_or_use_hints(
 		&self,
 		add_first: Option<syn::GenericArgument>,
 		args: &syn::punctuated::Punctuated<syn::Expr, Token![,]>,
