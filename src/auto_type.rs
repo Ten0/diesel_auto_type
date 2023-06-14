@@ -34,7 +34,11 @@ pub(crate) fn auto_type_impl(attr: TokenStream, input: &TokenStream) -> Result<T
 		expander_settings.type_case,
 	) {
 		(false, None, None) => None,
-		(true, None, None) => Some(Case::SnakeCase.ident_with_case(function_name)),
+		(true, None, None) => {
+			// We have to use snake as the default to be consistent with call expressions assuming that the type
+			// path is equal to the function name, as that is the convention in Diesel's `helper_types`
+			Some(Case::SnakeCase.ident_with_case(function_name))
+		}
 		(_, Some(ident), None) => Some(ident),
 		(_, None, Some(case)) => {
 			let case = Case::from_str(case.as_str(), case.span())?;
