@@ -175,23 +175,26 @@ impl TypeInferrer<'_> {
 								.map(|e| syn::GenericArgument::Type(self.infer_expression_type(e))),
 						)
 					}
-					Some(hint_or_override) => Either::Right({
-						let hints_none_if_infer = hint_or_override.args.iter().map(|ga| match ga {
-							syn::GenericArgument::Type(syn::Type::Infer(_)) => None,
-							other => Some(other),
-						});
-						if hints_none_if_infer.clone().any(|arg| arg.is_none()) {
-							// This is only partially hinted: we know how many generics there are, but there are some
-							// underscores. We need to infer those.
-							Either::Left(hints_none_if_infer.zip(args.iter()).map(|(hint, expr)| match hint {
-								Some(hint) => hint.clone(),
-								None => syn::GenericArgument::Type(self.infer_expression_type(expr)),
-							}))
-						} else {
-							// No underscores, we can just take the provided arguments
-							Either::Right(hint_or_override.args.iter().cloned())
-						}
-					}),
+					Some(hint_or_override) => Either::Right(
+						hint_or_override
+							.args
+							.iter()
+							.zip(args.iter().map(Some).chain((0..).map(|_| None)))
+							.map(|(hint, expr)| match (hint, expr) {
+								(syn::GenericArgument::Type(syn::Type::Infer(_)), Some(expr)) => {
+									syn::GenericArgument::Type(self.infer_expression_type(expr))
+								}
+								(generic_argument @ syn::GenericArgument::Type(syn::Type::Infer(_)), None) => {
+									syn::GenericArgument::Type(self.register_error(syn::Error::new_spanned(
+										generic_argument,
+										"auto_type: Can't infer generic argument because \
+													there is no function argument to infer from \
+													(less function arguments than generic arguments)",
+									)))
+								}
+								(generic_argument, _) => generic_argument.clone(),
+							}),
+					),
 				})
 				.collect(),
 			colon2_token: None, // there is no colon2 in types, only in function calls
