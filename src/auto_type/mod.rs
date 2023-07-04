@@ -103,7 +103,7 @@ pub(crate) fn auto_type_impl(attr: TokenStream, input: &TokenStream) -> Result<T
 			};
 			let inferrer = local_variables_map.inferrer();
 			(
-				inferrer.infer_expression_type(return_expression),
+				inferrer.infer_expression_type(return_expression, None),
 				inferrer.into_errors(),
 			)
 		}

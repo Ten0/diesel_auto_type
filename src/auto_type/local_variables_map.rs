@@ -38,10 +38,10 @@ impl<'a> LocalVariablesMap<'a> {
 				self.map.insert(
 					&pat_ident.ident,
 					match (type_ascription, local_init_expression) {
-						(None, Some(expr)) => {
+						(opt_type_ascription, Some(expr)) => {
 							let inferrer = self.inferrer();
 							LetStatementInferredType {
-								type_: inferrer.infer_expression_type(expr),
+								type_: inferrer.infer_expression_type(expr, opt_type_ascription),
 								errors: inferrer.into_errors(),
 							}
 						}
@@ -49,13 +49,6 @@ impl<'a> LocalVariablesMap<'a> {
 							type_: type_ascription.clone(),
 							errors: Vec::new(),
 						},
-						(Some(type_ascription), Some(expr)) => {
-							let inferrer = self.inferrer();
-							LetStatementInferredType {
-								type_: inferrer.infer_hinted_expression_type(expr, type_ascription),
-								errors: inferrer.into_errors(),
-							}
-						}
 						(None, None) => LetStatementInferredType {
 							type_: parse_quote!(_),
 							errors: vec![Rc::new(syn::Error::new_spanned(

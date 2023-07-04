@@ -15,44 +15,10 @@ pub(crate) struct TypeInferrer<'s> {
 }
 
 impl TypeInferrer<'_> {
-	pub(crate) fn infer_hinted_expression_type(&self, expr: &syn::Expr, hint: &syn::Type) -> syn::Type {
-		match hint {
-			syn::Type::Infer(_) => self.infer_expression_type(expr),
-			syn::Type::Tuple(type_tuple @ syn::TypeTuple { elems: type_elems, .. }) => match expr {
-				syn::Expr::Tuple(syn::ExprTuple { elems: expr_elems, .. }) => {
-					if type_elems.len() != expr_elems.len() {
-						return self.register_error(syn::Error::new(
-							type_tuple.span(),
-							"auto_type: tuple type and its \
-									expression have different number of elements",
-						));
-					}
-					syn::Type::Tuple(syn::TypeTuple {
-						elems: type_elems
-							.iter()
-							.zip(expr_elems.iter())
-							.map(|(type_, expr)| self.infer_hinted_expression_type(expr, type_))
-							.collect(),
-						..type_tuple.clone()
-					})
-				}
-				_ => {
-					// We're not going to be able to infer anything from this expression if its output is a tuple
-					// and its expression isn't
-					hint.clone()
-				}
-			},
-			_ => {
-				// TODO this can be improved to infer through partially hinted function calls
-				// This probably means merging this function with `infer_expression_type`
-				hint.clone()
-			}
-		}
-	}
 	/// Calls `try_infer_expression_type` and falls back to `_` if it fails, collecting the error
 	/// for display
-	pub(crate) fn infer_expression_type(&self, expr: &syn::Expr) -> syn::Type {
-		let inferred = self.try_infer_expression_type(expr);
+	pub(crate) fn infer_expression_type(&self, expr: &syn::Expr, type_hint: Option<&syn::Type>) -> syn::Type {
+		let inferred = self.try_infer_expression_type(expr, type_hint);
 
 		match inferred {
 			Ok(t) => t,
@@ -63,9 +29,37 @@ impl TypeInferrer<'_> {
 		self.errors.borrow_mut().push(Rc::new(error));
 		parse_quote!(_)
 	}
-	fn try_infer_expression_type(&self, expr: &syn::Expr) -> Result<syn::Type, syn::Error> {
-		let expression_type: syn::Type = match expr {
-			syn::Expr::Path(syn::ExprPath { path, .. }) => {
+	fn try_infer_expression_type(
+		&self,
+		expr: &syn::Expr,
+		type_hint: Option<&syn::Type>,
+	) -> Result<syn::Type, syn::Error> {
+		let expression_type: syn::Type = match (expr, type_hint.filter(|h| !matches!(h, syn::Type::Infer(_)))) {
+			(
+				syn::Expr::Tuple(syn::ExprTuple { elems: expr_elems, .. }),
+				Some(syn::Type::Tuple(type_tuple @ syn::TypeTuple { elems: type_elems, .. })),
+			) => {
+				if type_elems.len() != expr_elems.len() {
+					return Err(syn::Error::new(
+						type_tuple.span(),
+						"auto_type: tuple type and its \
+									expression have different number of elements",
+					));
+				}
+				syn::Type::Tuple(syn::TypeTuple {
+					elems: type_elems
+						.iter()
+						.zip(expr_elems.iter())
+						.map(|(type_, expr)| self.infer_expression_type(expr, Some(type_)))
+						.collect(),
+					..type_tuple.clone()
+				})
+			}
+			(syn::Expr::Tuple(syn::ExprTuple { elems, .. }), None) => syn::Type::Tuple(syn::TypeTuple {
+				elems: elems.iter().map(|e| self.infer_expression_type(e, None)).collect(),
+				paren_token: Default::default(),
+			}),
+			(syn::Expr::Path(syn::ExprPath { path, .. }), None) => {
 				// This is either a local variable or we should assume that the type exists at the same path as the
 				// function
 				if let Some(LetStatementInferredType { type_, errors }) = path
@@ -83,10 +77,10 @@ impl TypeInferrer<'_> {
 					})
 				}
 			}
-			syn::Expr::Call(syn::ExprCall { func, args, .. }) => {
+			(syn::Expr::Call(syn::ExprCall { func, args, .. }), None) => {
 				let unsupported_function_type =
 					|| syn::Error::new_spanned(&**func, "unsupported function type for auto_type");
-				let func_type = self.try_infer_expression_type(func)?;
+				let func_type = self.try_infer_expression_type(func, None)?;
 				// First we extract the type of the function
 				let mut type_path = match func_type {
 					syn::Type::Path(syn::TypePath { path, .. }) => path,
@@ -108,13 +102,16 @@ impl TypeInferrer<'_> {
 					qself: None,
 				})
 			}
-			syn::Expr::MethodCall(syn::ExprMethodCall {
-				receiver,
-				method,
-				turbofish,
-				args,
-				..
-			}) => syn::Type::Path(syn::TypePath {
+			(
+				syn::Expr::MethodCall(syn::ExprMethodCall {
+					receiver,
+					method,
+					turbofish,
+					args,
+					..
+				}),
+				None,
+			) => syn::Type::Path(syn::TypePath {
 				path: syn::Path {
 					segments: self
 						.local_variables_map
@@ -129,7 +126,7 @@ impl TypeInferrer<'_> {
 								method.span(),
 							),
 							arguments: self.infer_generics_or_use_hints(
-								Some(syn::GenericArgument::Type(self.infer_expression_type(receiver))),
+								Some(syn::GenericArgument::Type(self.infer_expression_type(receiver, None))),
 								args,
 								turbofish.as_ref(),
 							)?,
@@ -139,11 +136,7 @@ impl TypeInferrer<'_> {
 				},
 				qself: None,
 			}),
-			syn::Expr::Tuple(syn::ExprTuple { elems, .. }) => syn::Type::Tuple(syn::TypeTuple {
-				elems: elems.iter().map(|e| self.infer_expression_type(e)).collect(),
-				paren_token: Default::default(),
-			}),
-			syn::Expr::Lit(syn::ExprLit { lit, .. }) => match lit {
+			(syn::Expr::Lit(syn::ExprLit { lit, .. }), None) => match lit {
 				syn::Lit::Str(_) => parse_quote!(&'static str),
 				syn::Lit::ByteStr(_) => parse_quote!(&'static [u8]),
 				syn::Lit::Byte(_) => parse_quote!(u8),
@@ -153,11 +146,13 @@ impl TypeInferrer<'_> {
 				syn::Lit::Bool(_) => parse_quote!(bool),
 				_ => return Err(syn::Error::new(lit.span(), "unsupported literal for auto_type")),
 			},
-			_ => return Err(syn::Error::new(expr.span(), "unsupported expression for auto_type")),
+			(_, None) => return Err(syn::Error::new(expr.span(), "unsupported expression for auto_type")),
+			(_, Some(type_hint)) => type_hint.clone(),
 		};
 		Ok(expression_type)
 	}
 
+	/// `infer` is always supposed to be a syn::Type::Infer
 	fn infer_generics_or_use_hints(
 		&self,
 		add_first: Option<syn::GenericArgument>,
@@ -172,7 +167,7 @@ impl TypeInferrer<'_> {
 						// We should infer
 						Either::Left(
 							args.iter()
-								.map(|e| syn::GenericArgument::Type(self.infer_expression_type(e))),
+								.map(|e| syn::GenericArgument::Type(self.infer_expression_type(e, None))),
 						)
 					}
 					Some(hint_or_override) => Either::Right(
@@ -181,15 +176,15 @@ impl TypeInferrer<'_> {
 							.iter()
 							.zip(args.iter().map(Some).chain((0..).map(|_| None)))
 							.map(|(hint, expr)| match (hint, expr) {
-								(syn::GenericArgument::Type(syn::Type::Infer(_)), Some(expr)) => {
-									syn::GenericArgument::Type(self.infer_expression_type(expr))
+								(syn::GenericArgument::Type(type_hint), Some(expr)) => {
+									syn::GenericArgument::Type(self.infer_expression_type(expr, Some(type_hint)))
 								}
 								(generic_argument @ syn::GenericArgument::Type(syn::Type::Infer(_)), None) => {
 									syn::GenericArgument::Type(self.register_error(syn::Error::new_spanned(
 										generic_argument,
 										"auto_type: Can't infer generic argument because \
-													there is no function argument to infer from \
-													(less function arguments than generic arguments)",
+											there is no function argument to infer from \
+											(less function arguments than generic arguments)",
 									)))
 								}
 								(generic_argument, _) => generic_argument.clone(),
